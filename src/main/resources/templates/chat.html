@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Real-Time Chat App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #chatArea {
+            border: 1px solid #ccc;
+            height: 400px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #dcf8c6;
+            text-align: right;
+        }
+        .other-message {
+            background-color: #fff;
+        }
+        #messageInput {
+            width: 70%;
+            padding: 10px;
+        }
+        #sendButton {
+            width: 25%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #nameInput {
+            width: 30%;
+            padding: 10px;
+            margin-right: 10px;
+        }
+        .sender {
+            font-weight: bold;
+            color: #007bff;
+        }
+        #currentUser {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-Time Chat App</h1>
+    
+    <div>
+        <input type="text" id="nameInput" placeholder="Enter your name" />
+        <button id="connectButton">Connect</button>
+        <button id="disconnectButton" disabled>Disconnect</button>
+    </div>
+    <div id="currentUser"></div>
+    
+    <!-- Debug info section -->
+    <div id="debugInfo" style="margin-top: 10px; font-size: 0.8em; color: #666;"></div>
+    
+    <div id="chatArea"></div>
+    
+    <div>
+        <input type="text" id="messageInput" placeholder="Type your message here..." disabled />
+        <button id="sendButton" disabled>Send</button>
+    </div>
+
+    <script>
+        var stompClient = null;
+        var userName = null;
+
+        // Connect to WebSocket
+        function connect() {
+            var nameInput = document.getElementById('nameInput').value.trim();
+            if (!nameInput) {
+                alert('Please enter your name');
+                return;
+            }
+            
+            // Store the user name
+            userName = nameInput;
+
+            // Show connecting status
+            document.getElementById('currentUser').innerHTML = '<span>Connecting...</span>';
+            document.getElementById('connectButton').disabled = true;
+            
+            // Add debug info
+            var debugInfo = 'Attempting to connect to WebSocket endpoint: /chat';
+            console.log(debugInfo);
+            document.getElementById('debugInfo').innerHTML = debugInfo;
+
+            try {
+                var socket = new SockJS('/chat');
+                stompClient = Stomp.over(socket);
+                
+                // Set connection timeout
+                stompClient.connect({}, function (frame) {
+                    var successMsg = 'Connected successfully: ' + frame;
+                    console.log(successMsg);
+                    document.getElementById('debugInfo').innerHTML = successMsg;
+                    
+                    document.getElementById('connectButton').disabled = true;
+                    document.getElementById('disconnectButton').disabled = false;
+                    document.getElementById('messageInput').disabled = false;
+                    document.getElementById('sendButton').disabled = false;
+                    document.getElementById('nameInput').disabled = true;
+                    
+                    // Show current user
+                    document.getElementById('currentUser').innerHTML = '<span class="success">Connected as: ' + userName + '</span>';
+                    
+                    // Subscribe to chat messages
+                    stompClient.subscribe('/topic/message', function (messageOutput) {
+                        try {
+                            showMessage(JSON.parse(messageOutput.body));
+                        } catch (e) {
+                            console.error('Error parsing message:', e);
+                        }
+                    });
+                    
+                    // Show connection message
+                    addToChatArea('<em>Connected to chat as ' + userName + '</em>');
+                }, function(error) {
+                    var errorMsg = 'STOMP error: ' + JSON.stringify(error);
+                    console.log(errorMsg);
+                    document.getElementById('debugInfo').innerHTML = errorMsg;
+                    alert('Connection error. Please try again. Check console for details.');
+                    document.getElementById('currentUser').innerHTML = '<span class="error">Connection failed</span>';
+                    document.getElementById('connectButton').disabled = false;
+                });
+            } catch (error) {
+                var errorMsg = 'Connection error: ' + error.message || error;
+                console.log(errorMsg);
+                document.getElementById('debugInfo').innerHTML = errorMsg;
+                alert('Failed to establish connection. Please try again.');
+                document.getElementById('currentUser').innerHTML = '<span class="error">Connection failed</span>';
+                document.getElementById('connectButton').disabled = false;
+            }
+        }
+
+        // Disconnect from WebSocket
+        function disconnect() {
+            if (stompClient !== null) {
+                stompClient.disconnect();
+            }
+            
+            document.getElementById('connectButton').disabled = false;
+            document.getElementById('disconnectButton').disabled = true;
+            document.getElementById('messageInput').disabled = true;
+            document.getElementById('sendButton').disabled = true;
+            document.getElementById('nameInput').disabled = false;
+            
+            // Clear current user display
+            document.getElementById('currentUser').innerHTML = '';
+            
+            addToChatArea('<em>Disconnected from chat</em>');
+            console.log("Disconnected");
+            userName = null;
+        }
+
+        // Send message
+        function sendMessage() {
+            var messageContent = document.getElementById('messageInput').value.trim();
+            if (!messageContent) {
+                alert('Please enter a message');
+                return;
+            }
+            
+            if (!stompClient) {
+                alert('Please connect first by entering your name and clicking Connect');
+                return;
+            }
+            
+            if (!userName) {
+                alert('Please connect first by entering your name and clicking Connect');
+                return;
+            }
+            
+            var chatMessage = {
+                sender: userName,
+                content: messageContent
+            };
+            
+            stompClient.send("/app/sendMessage", {}, JSON.stringify(chatMessage));
+            document.getElementById('messageInput').value = '';
+        }
+
+        // Display message in chat area
+        function showMessage(message) {
+            var chatArea = document.getElementById('chatArea');
+            var messageElement = document.createElement('div');
+            messageElement.className = 'message other-message';
+            
+            var senderElement = document.createElement('span');
+            senderElement.className = 'sender';
+            senderElement.textContent = message.sender + ': ';
+            
+            var contentElement = document.createTextNode(message.content);
+            
+            messageElement.appendChild(senderElement);
+            messageElement.appendChild(contentElement);
+            chatArea.appendChild(messageElement);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Add system messages to chat area
+        function addToChatArea(message) {
+            var chatArea = document.getElementById('chatArea');
+            var messageElement = document.createElement('div');
+            messageElement.innerHTML = message;
+            chatArea.appendChild(messageElement);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Event listeners
+        document.addEventListener("DOMContentLoaded", function() {
+            document.getElementById('connectButton').addEventListener('click', connect);
+            document.getElementById('disconnectButton').addEventListener('click', disconnect);
+            document.getElementById('sendButton').addEventListener('click', sendMessage);
+            
+            document.getElementById('messageInput').addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+            
+            document.getElementById('nameInput').addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    connect();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

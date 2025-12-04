@@ -12,8 +12,6 @@ import lombok.Setter;
 
 public class ChatMassage {
     private Long id;
-    private String send;
+    private String sender;
     private String content;
-
-
 }
